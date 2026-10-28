@@ -1,0 +1,376 @@
+DATABASES
+
+
+1. SQL vs NoSQL
+
+SQL databases such as PostgreSQL and MySQL store data in related tables with a predefined schema. Their biggest strengths are ACID transactions, strong consistency, joins, foreign keys, and powerful querying capabilities. They are typically chosen for systems where correctness matters more than anything else, such as banking, payments, inventory management, order processing, and financial systems. The tradeoff is that schema evolution requires more planning, and scaling across many machines becomes more complex when relational guarantees must be preserved.
+
+NoSQL databases are a broad category that includes key-value stores (Redis, DynamoDB), document databases (MongoDB), wide-column databases (Cassandra, HBase), and graph databases (Neo4j). They are generally designed for flexibility, massive scale, high write throughput, and simpler horizontal expansion. They excel in use cases such as social feeds, user activity tracking, logging, analytics, telemetry, and content management systems. The tradeoff is that they often rely on application-level design decisions rather than database-enforced relationships.
+
+
+The Most Important Interview Nuance:
+
+A common misconception is that SQL databases cannot be sharded while NoSQL databases can. This is incorrect. SQL databases can absolutely be sharded using a partition key such as userId, just like MongoDB shards documents using a shard key. The hard part is not distributing data across machines. The hard part is preserving transactions, joins, foreign keys, consistency guarantees, and relational behavior once the data is distributed.
+A good interview statement is: "Sharding is easy. Preserving relational guarantees across shards is hard.
+
+
+Why Sharding Becomes Difficult:
+
+The first major challenge is joins. In a single database instance, joins are local operations. Once data is spread across shards, the database may need to fetch data from multiple machines, move it across the network, and merge the results. This increases latency and complexity.
+The second challenge is distributed transactions. If a transaction touches data on multiple shards, the system now needs some form of coordination protocol, such as Two-Phase Commit. Distributed transactions are slower, harder to reason about, and more difficult to recover when failures occur.
+The third challenge is referential integrity. Features like foreign keys become difficult when related records may exist on different machines. The database can no longer validate everything with a simple local check.
+The fourth challenge is global aggregations. Queries such as total sales, average order amount, or total user count require querying every shard, collecting results, and merging them. What was a single-machine operation becomes a distributed computation.
+
+
+Why NoSQL Appears Easier to Scale:
+The key reason is not that NoSQL magically avoids distributed systems challenges. Instead, most NoSQL databases encourage data models and access patterns that avoid cross-shard operations in the first place.
+Relational databases often promote normalization, where data is split across multiple related tables. This minimizes duplication but increases the likelihood of joins and cross-table queries.
+NoSQL databases frequently encourage denormalization, where related data is stored together and some duplication is accepted. The benefit is that a request can often be satisfied from a single document, a single partition, or a single shard. This reduces the need for joins and distributed coordination, making horizontal scaling easier in practice.
+
+
+MongoDB and the "NoSQL Scales Better" Myth:
+MongoDB is a great example of why the real issue is distributed systems rather than SQL vs NoSQL. Early MongoDB focused on simple document access patterns and minimal cross-document guarantees. Over time, users demanded SQL-like functionality, so MongoDB added transactions, aggregation pipelines, and joins through $lookup.
+As soon as these features were introduced, MongoDB started facing many of the same challenges seen in distributed SQL systems. Cross-shard joins become expensive, distributed transactions require coordination, and aggregations may need scatter-gather operations across multiple shards. This demonstrates that the complexity comes from the distributed features themselves, not from whether the database is labeled SQL or NoSQL.
+
+
+When to Choose SQL:
+Choose SQL when transactions are critical, consistency is non-negotiable, relationships between entities matter, and complex querying is common. Typical examples include banking systems, payment gateways, e-commerce order management, inventory systems, reservation systems, and financial applications. If losing data integrity would be unacceptable, SQL is usually the safer choice.
+
+When to Choose NoSQL:
+Choose NoSQL when the system must handle enormous scale, very high write throughput, rapidly changing schemas, or highly predictable access patterns. Typical examples include social media feeds, activity streams, logging platforms, analytics systems, recommendation engines, IoT telemetry, and content platforms. If data can be modeled around specific query patterns and some duplication is acceptable, NoSQL often scales more naturally.
+
+
+Polyglot Persistence:
+One of the most important HLD concepts is that real-world systems rarely use a single database. Instead, they use the best tool for each job.
+A typical e-commerce architecture might use PostgreSQL for orders and payments because transactions matter, MongoDB for product catalogs because schemas vary frequently, Redis for caching because latency must be low, Elasticsearch for search because full-text indexing is required, and Cassandra or DynamoDB for user activity logs because write volume is enormous.
+This approach is called polyglot persistence, and it is often the best answer in a senior-level HLD interview.
+
+
+Which ACID properties become difficult after sharding?
+Atomicity becomes difficult because a transaction may span multiple shards and requires distributed transaction protocols. Consistency becomes difficult because constraints and invariants may involve data on multiple machines. Isolation becomes difficult because maintaining a globally consistent view across shards requires coordination. Durability is the least affected since each shard can independently persist and replicate its data.
+
+
+Summary:
+SQL and NoSQL are not competitors; they are tools optimized for different requirements. SQL prioritizes transactions, consistency, relationships, and data integrity. NoSQL prioritizes flexibility, scalability, and throughput. Sharding itself is straightforward in both worlds. The real difficulty begins when you need joins, transactions, aggregations, or consistency guarantees across multiple machines. Every database faces these challenges once data becomes distributed. The difference is that many NoSQL systems encourage designs that avoid needing those expensive distributed operations in the first place.
+
+
+
+2. ACID vs BASE
+
+ACID is the philosophy of prioritizing correctness and reliability. Atomicity ensures a transaction either completes fully or not at all, Consistency ensures business rules and constraints are never violated, Isolation prevents concurrent transactions from interfering with each other, and Durability guarantees committed data survives failures. ACID is crucial in systems where data correctness directly impacts the business, such as banking, payments, trading platforms, booking systems, and inventory management. In these domains, temporary inconsistency can lead to financial loss or corrupted business state.
+
+BASE is the philosophy of prioritizing scalability and availability in distributed systems. Basically Available means the system continues serving requests even during failures, Soft State means replicas may temporarily contain different data as updates propagate, and Eventual Consistency means all replicas will converge to the same state if no new updates arrive. BASE is common in social media feeds, analytics systems, recommendation engines, logging platforms, and telemetry systems where temporary staleness is acceptable and system availability is more important than immediate consistency.
+
+The key tradeoff is that ACID optimizes for correctness, while BASE optimizes for scalability and fault tolerance. An ACID-oriented system is willing to sacrifice some performance or availability to ensure all users immediately see correct data. A BASE-oriented system is willing to tolerate temporary inconsistencies so that it can remain highly available and scale across many machines and regions.
+
+A common interview misconception is that SQL equals ACID and NoSQL equals BASE. In reality, ACID and BASE are design philosophies, not database categories. Modern SQL databases typically provide strong ACID guarantees, but many NoSQL databases also support transactions and strong consistency for certain operations. Likewise, some SQL-based distributed systems make BASE-like tradeoffs at massive scale. The real question is not SQL versus NoSQL, but rather what consistency, availability, and scalability requirements the application has.
+
+In real-world systems, both approaches are usually used together. Critical data such as orders, payments, balances, and inventory are stored in ACID-compliant systems because correctness is essential. Less critical components such as activity feeds, recommendations, clickstream events, analytics, and user engagement metrics often use BASE-oriented systems because they prioritize availability and throughput. A stale recommendation is acceptable; a stale bank balance is not.
+
+
+
+
+Indexing
+
+An index is a secondary data structure maintained by the database that allows it to locate rows quickly without scanning the entire table. Instead of checking every record one by one, the database searches the index, which keeps the indexed values in an organized structure (typically a B+ Tree), and then jumps directly to the required row. This significantly reduces the amount of data that must be read from disk.
+
+Indexes are useful because they make queries much faster, especially as the table grows from thousands to millions or billions of rows. They are particularly effective for lookups, range queries, sorting, pagination, and filtering operations. The tradeoff is that indexes consume additional storage and make inserts, updates, and deletes slightly slower because the index must also be updated whenever the underlying data changes. In short, indexes trade a small write cost and extra storage for a large improvement in read performance.
+
+
+B and B+ trees
+
+B-Tree
+A B-Tree is a balanced, multi-way search tree designed for efficient disk access. Unlike a binary tree where each node contains one key and at most two children, a B-Tree node can contain many keys and many child pointers. The keys divide the data into ranges, allowing the database to quickly decide which child to follow during a search. All leaf nodes remain at the same depth, ensuring predictable performance.
+In a classic B-Tree, data can be stored in both internal nodes and leaf nodes. This means a search may sometimes find the requested value before reaching a leaf. For example, if the root node contains the key 20, searching for 20 may stop immediately at the root without traversing deeper into the tree.
+
+
+B+ Tree
+
+A B+ Tree is a variation of the B-Tree that is optimized for databases and file systems. Internal nodes contain only keys and child pointers. They act purely as navigation structures. The actual data (or row pointers) is stored only in the leaf nodes.
+For example:
+                [20 | 40]
+               /     |     \
+              /      |      \
+    [5 10 15]  [20 25 30 35]  [40 45 50]
+The root contains only routing information. Even if searching for 20, the database must continue to the leaf node where the actual record pointer resides. Another important feature is that all leaf nodes are linked together, typically like a linked list:
+[5 10 15]
+    →
+[20 25 30 35]
+    →
+[40 45 50]
+This makes sequential access extremely efficient.
+
+
+Why B+ Trees Are Preferred?:
+The biggest advantage of a B+ Tree is that all data is stored in the leaves and all leaves are linked together. This makes range scans, sorting, and pagination very efficient.
+For example, if a query asks: WHERE age BETWEEN 20 AND 50
+the database:
+Uses the tree to find age 20. Starts reading the leaf node. Follows the leaf-node links until it reaches 50. It does not need to repeatedly traverse the tree for each value.
+Similarly, operations such as:
+
+SQL
+ORDER BY age
+LIMIT 100
+are extremely efficient because the leaf nodes already store data in sorted order.
+
+Revision Summary:
+A B-Tree is a balanced multi-way tree where data can be stored in both internal and leaf nodes. A B+ Tree stores actual data only in the leaf nodes, while internal nodes act as navigation points. The leaf nodes are connected in sorted order, allowing very efficient range scans, ordering, and pagination. Because databases frequently perform these operations, B+ Trees are preferred and are used by databases such as PostgreSQL, MySQL InnoDB, SQL Server, and Oracle.
+
+
+Clustered vs Non-Clustered Index
+A clustered index determines the physical order of data on disk. Since data can only be physically ordered one way, there is usually only one clustered index.
+A non-clustered index is a separate structure containing the indexed value and a pointer to the actual row. You can have many non-clustered indexes.
+Key interview takeaway: Clustered indexes are great for range scans because related rows are physically close together.
+
+
+LSM Tree
+An LSM (Log-Structured Merge) Tree is a storage structure optimized for high write throughput. Instead of updating data directly on disk for every write like a B+ Tree, it first writes the data to a Write-Ahead Log (WAL) for durability and then stores it in an in-memory MemTable, which keeps the data sorted. When the MemTable becomes full, it is flushed to disk as a sorted, immutable file called an SSTable (Sorted String Table). Over time, multiple SSTables accumulate, so the database periodically merges them through a process called compaction, creating fewer and larger sorted SSTables.
+LSM Trees were created because updating sorted structures on disk for every write can be expensive. Their main advantage is that writes are mostly sequential appends, making them extremely fast for workloads such as logs, analytics, telemetry, event streams, and time-series data. The tradeoff is that reads can be slower because data may exist in the MemTable or across multiple SSTables, requiring the database to check several locations before finding a value.
+Deletes and Tombstones:
+Since SSTables are immutable, records cannot be physically removed immediately. When a delete occurs, the database writes a special marker called a tombstone instead of removing the data. During reads, if a tombstone is encountered, the record is treated as deleted. Later, when compaction runs and sees both the old record and its tombstone, it permanently removes them from the merged SSTable.
+Compaction periodically asks:
+"For each key, what is the most recent operation?"
+If the latest operation is a value, that value survives. If the latest operation is a tombstone, the key is considered deleted and will eventually be removed entirely. That's why tombstones work even though SSTables are immutable. The database never removes data immediately; it records a newer "delete version" and lets compaction clean things up later.
+
+Example flow:
+Write Key=25
+        ↓
+Append to WAL (durability)
+        ↓
+Add to MemTable (sorted in memory)
+        ↓
+MemTable fills up
+        ↓
+Flush to disk as SSTable-1
+
+Later writes...
+        ↓
+WAL
+        ↓
+MemTable
+        ↓
+Flush
+        ↓
+SSTable-2
+
+SSTable-1 + SSTable-2
+        ↓
+Compaction
+        ↓
+Larger merged SSTable
+
+
+Quick Comparison
+B+ Tree: Organizes data during every write, giving excellent read performance but relatively slower writes.
+LSM Tree: Writes first and organizes later, giving excellent write performance but more complex reads.
+	Used by: Cassandra, ScyllaDB, RocksDB, LevelDB.
+	Best for: Heavy-write workloads.
+	Main concepts: WAL → MemTable → SSTable → Compaction.
+	
+	
+	
+Replication:
+Replication is the process of maintaining one or more copies of a database to improve availability, fault tolerance, and read scalability. In a primary-replica architecture, all writes go to the primary and are copied to replicas. Synchronous replication waits for replicas before acknowledging a write, providing stronger consistency but increasing latency. Asynchronous replication acknowledges the write immediately and updates replicas later, improving performance but introducing replication lag. Replication lag can cause stale reads and read-after-write consistency issues when clients read from replicas before updates arrive. Replicas also enable failover, where a replica is promoted to primary if the original primary fails, helping the system remain available during outages.
+
+
+
+Consistency Models:
+"What guarantees does the system give about what a read can see after a write?"
+Strong Consistency: After a successful write, every future read returns the latest value.
+Eventual Consistency: After writing a value, replicas may temporarily disagree.
+Read-Your-Writes Consistency: A user can immediately see their own writes. Even if the system is eventually consistent globally, that user should see their new data immediately if udpated.
+Monotonic Reads: Once you've seen a newer value, you never see an older value later.
+
+Consistency models define what guarantees a system provides when reading data after writes. Strong consistency guarantees every read sees the latest successful write, while eventual consistency allows temporary differences between replicas but guarantees convergence over time. Read-your-writes consistency ensures users can immediately see their own updates, and monotonic reads ensure that once a client observes a newer value, it never later observes an older one.
+
+
+Isolation Levels:
+Isolation levels are about concurrent transactions on the same database.
+Question: What happens when multiple transactions run at the same time?:
+Dirty Read: A dirty read occurs when a transaction sees another transaction's uncommitted changes. The danger is that the other transaction might roll back, meaning the observed data never officially existed. Read Uncommitted allows dirty reads, while higher isolation levels prevent them. 
+Eg: Transaction A updates a value to 50 from 100. Before committing transaction B reads it. But A rolls back. So B read a data that was never committed.
+Non-Repeatable Read: A non-repeatable read occurs when a transaction reads the same row twice and gets different values because another transaction committed an update between the two reads. The row itself already existed; only its value changed. Read Committed allows this behavior, while Repeatable Read and Serializable prevent it.
+Eg: Transaction A reads a value as 50. Transaction A is not over yet. Transaction B updates the value to 100 and commits. As part of transaction A the value is read again but now its 100. So same read different values in the same transaction.
+Phantom reads: A phantom read occurs when a transaction executes the same query twice and finds a different set of rows because another transaction inserted or deleted matching rows in between. Unlike a non-repeatable read, where an existing row changes, a phantom read involves rows appearing or disappearing from the result set.
+Eg: Transaction A: Count users where age > 18 return 100. Transaction B inserts a new adult. Transaction A runs same query: now gets 101. A new row "appears". This is a phantom read.
+
+Non-Repeatable Read vs Phantom read:
+Non-repeatable read → same rows, different values
+Phantom read → different rows
+
+
+Levels:
+Read Uncommitted:
+This is the weakest isolation level. A transaction is allowed to see changes made by another transaction even if those changes have not yet been committed. This can lead to dirty reads, where a transaction observes data that may later be rolled back and never actually exist in the database. For example, Transaction A updates a balance from ₹100 to ₹50 but has not committed yet. Transaction B reads the balance and sees ₹50. If Transaction A later rolls back, the balance returns to ₹100, meaning Transaction B saw a value that was never truly committed. Because of this risk, Read Uncommitted is rarely used in practice.
+
+Read Committed: 
+Read Committed prevents dirty reads by ensuring that a transaction can only see data that has already been committed. If Transaction A updates a balance but has not committed yet, Transaction B continues to see the old committed value. However, Read Committed still allows non-repeatable reads. If Transaction B reads a row, then another transaction commits an update to that row, Transaction B may get a different result when it reads the same row again within the same transaction. This isolation level provides a good balance between correctness and performance and is the default in several databases.
+
+Repeatable Read:
+Repeatable Read guarantees that if a transaction reads a row once, it will continue seeing the same version of that row throughout the transaction, even if another transaction updates and commits changes meanwhile. This prevents both dirty reads and non-repeatable reads. For example, if Transaction A reads a balance of ₹100, it will continue seeing ₹100 for the duration of the transaction, even if another transaction changes it to ₹200. The goal is to provide a stable view of the rows that have already been read. In many databases, this is implemented using MVCC rather than locking.
+
+Serializable:
+Serializable is the strongest isolation level. It guarantees that concurrent transactions behave as if they were executed one after another in some sequential order. This prevents dirty reads, non-repeatable reads, and phantom reads. For example, if two users attempt to buy the last item in stock simultaneously, Serializable isolation ensures the outcome is identical to one user purchasing first and the other purchasing afterward. This provides the highest degree of correctness but also introduces the most coordination and the greatest performance overhead.
+
+
+Distributed Transactions:
+What happens when a single transaction needs to update data on multiple databases, shards, or services?
+
+Two Phase Commit (2PC):
+There are three actors:
+Coordinator
+Participant 1
+Participant 2
+
+For example:
+Coordinator
+Shard A
+Shard B
+
+Phase 1: Prepare
+Coordinator asks each participant: Can you commit?
+Shard A: Yes
+Shard B: Yes
+
+They don't actually commit yet. Instead they:
+Validate constraints
+Acquire locks
+Write transaction state to disk
+Get ready to commit
+
+Phase 2: Commit
+Coordinator
+   ↓
+COMMIT
+Shard A commits
+Shard B commits
+
+Failure Scenario
+Suppose: Phase 1 completed and everyone said Yes. Then the coordinator crashes before phase 2. Now participants are stuck:
+Committed?
+Not committed?
+Wait?
+They cannot decide on their own. This is why 2PC is called a blocking protocol.
+
+Advantages of 2PC
+Strong consistency
+Preserves atomicity
+Familiar model
+Works well for critical financial systems
+
+Disadvantages of 2PC
+High latency
+Many network round trips
+Coordinator becomes important
+Participants may remain blocked during failures
+Doesn't scale particularly well
+
+Modern systems avoid 2PC as 2PC across dozen of services becomes painful. Adds latency. Failures become complicated.
+
+
+Saga Pattern:
+Instead of one gian transaction, small local transactions.
+
+E-Commerce Example
+Order placement:
+Step 1 :Create Order✅
+Step 2 :Reserve Inventory✅
+Step 3 :Charge Payment❌
+Payment fails.
+Now what? - Compensating Actions
+Undo previous work:
+Release Inventory
+Cancel Order
+Instead of one database rollback: Business rollback through compensating actions.
+
+2PC:
+Nothing succeeds until everyone agrees.
+
+Saga:
+Let steps succeed individually. If something later fails,execute compensations.
+
+Two Phase Commit
+Best when:
+Strong consistency required
+Money cannot disappear
+Atomicity is mandatory
+Examples:
+Banking
+Financial transfers
+Core ledger systems
+
+Saga
+Best when:
+Microservices
+High scale
+User-facing workflows
+Examples:
+Amazon orders
+Hotel booking
+Flight booking
+Food delivery
+
+
+Why Not Use Distributed Transactions Everywhere?
+Because they are expensive. Costs include:
+Network communication
+Lock contention
+Coordinator overhead
+Reduced availability
+Reduced scalability
+
+Systems prefer:
+Eventual consistency
++
+Saga pattern
+
+Revision:
+A distributed transaction is a transaction that spans multiple databases, shards, or services while still requiring atomicity. The traditional solution is Two Phase Commit (2PC), where a coordinator first asks all participants to prepare and then instructs them to commit only if everyone is ready. This guarantees strong consistency but introduces latency, blocking, and coordination overhead. Modern distributed systems often prefer the Saga Pattern, where each service performs its own local transaction and, if a later step fails, previously completed steps are undone using compensating actions. In practice, 2PC is common in strongly consistent financial systems, while Sagas are common in large-scale microservice architectures.
+
+
+Multi-Region Databases
+A multi-region database stores data across multiple geographic regions (for example, India, US, and Europe) instead of keeping everything in a single data center. It is primarily used to reduce latency for global users, improve availability during regional outages, provide disaster recovery, and satisfy data residency requirements. Without a multi-region setup, users far from the database experience higher network delays, and an outage in the hosting region can impact the entire application. By placing data closer to users and maintaining copies across regions, applications can serve requests faster and remain available even if a region fails.
+
+Active-Passive:
+In an active-passive architecture, one region acts as the primary write region while other regions maintain replicas of the data. All writes are routed to the primary region, while reads may be served from local replicas. This model is simpler because it avoids write conflicts and provides a clear source of truth. If the primary region fails, a replica can be promoted to become the new primary. The tradeoff is that writes may experience higher latency for users who are far from the primary region, and failover is required during regional outages.
+
+Active-Active:
+In an active-active architecture, multiple regions can accept writes independently. Users are typically routed to the nearest region, resulting in lower latency and better availability. However, since different regions can update the same data before replication completes, conflicts may occur. The challenge is no longer deciding where data is stored but determining how to reconcile multiple valid updates that happened concurrently. Active-active architectures are common in systems where availability and responsiveness are more important than immediate global consistency.
+
+Conflict Resolution:
+The biggest challenge in active-active systems is handling conflicting updates. For example, two users in different regions may simultaneously update the same inventory record, document, or shared resource before their changes have replicated worldwide. Common resolution strategies include Last-Write-Wins, where the newest update is kept, and application-specific merge logic, where the application decides how updates should be combined. The correct strategy depends on the business domain. Social media and collaborative systems can often tolerate simple conflict resolution, whereas financial systems usually require much stricter controls.
+
+Replication Lag:
+Even in a multi-region setup, replication is not instantaneous. Data must travel across continents, introducing network delay. As a result, one region may temporarily contain newer data than another region. This phenomenon is called replication lag and can lead to users seeing slightly stale information until synchronization completes. The farther apart the regions, the greater the potential delay and the higher the likelihood of temporary inconsistencies.
+
+Active-Passive vs Active-Active:
+Active-passive prioritizes simplicity and consistency by allowing writes in only one region. It is easier to operate and avoids most conflict-resolution problems, but users may experience higher write latency if they are far from the primary region. Active-active prioritizes low latency and high availability by allowing writes in multiple regions, but it introduces challenges such as replication lag, conflict resolution, and increased operational complexity.
+
+Quick Revision:
+A multi-region database distributes data across geographic regions to reduce latency, improve availability, and survive regional failures. Active-passive architectures use a single write region and multiple read replicas, providing simpler consistency but requiring failover during outages. Active-active architectures allow writes in multiple regions, reducing latency and improving availability but introducing replication lag and write conflicts. Conflict resolution mechanisms such as Last-Write-Wins or application-specific merge rules are used to reconcile concurrent updates. In practice, systems requiring strict correctness often prefer active-passive designs, while globally distributed, user-facing applications frequently adopt active-active architectures.
+
+
+Quorum
+Suppose data is replicated to: Node A, Node B, Node C
+Replication factor: N = 3
+Instead of requiring all 3 nodes for every read or write, we can require only a subset. That subset is called a quorum.
+
+Write Quorum (W) :A write is considered successful only after it has been acknowledged by W replicas.
+Read Quorum (R): A read queries R replicas and uses the newest value among them.
+
+Why R + W > N Matters:
+Consider:
+N = 3
+R = 2
+W = 2
+R + W = 4 > 3
+This guarantees that at least one node involved in the read also participated in the latest successful write. That's the key idea. Since the read and write sets overlap, reads are very likely to see the newest data.
+Eg:
+Update acknowledged by A and B but not C. That is W=2. Possible reads:
+A + B
+A + C
+B + C
+Every combination contains at least one node with the latest value. (R=2)
+
+Revision Paragraph:
+A quorum is the minimum number of replicas that must participate in a read or write operation in a replicated system. If data is stored on N replicas, a write must be acknowledged by W replicas and a read must consult R replicas. When R + W > N, the read and write sets overlap, making it highly likely that reads will observe the latest successful write. Increasing quorum sizes improves consistency but increases latency and reduces availability, while smaller quorums improve performance at the cost of potentially returning stale data. Quorums are a fundamental concept in distributed databases such as Cassandra and DynamoDB and are commonly discussed in HLD interviews when explaining replication and consistency tradeoffs.

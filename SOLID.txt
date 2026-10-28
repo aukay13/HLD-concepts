@@ -1,0 +1,288 @@
+Single Responsibility Principle (SRP):
+
+Single Responsibility Principle states that a class should have only one reason to change. A class should perform one well-defined responsibility. For example, instead of an Employee class handling employee data, database operations, and report generation, we should separate those concerns into Employee, EmployeeRepository, and EmployeeReport classes. This makes the code easier to maintain, test, and modify.
+
+
+
+
+
+OCP:
+
+Open/Closed Principle states that software components should be open for extension but closed for modification. Instead of modifying existing working code whenever a new requirement arrives, we should design abstractions such as interfaces or abstract classes and extend behavior through new implementations. For example, a Discount interface can have RegularDiscount, PremiumDiscount, and VipDiscount implementations without changing the discount calculation logic.
+
+BAD EXAMPLE
+class DiscountCalculator {
+
+    public double calculate(String customerType, double amount) {
+
+        if(customerType.equals("REGULAR")) {
+            return amount * 0.1;
+        }
+
+        if(customerType.equals("PREMIUM")) {
+            return amount * 0.2;
+        }
+
+        return 0;
+    }
+}
+
+GOOD EXAMPLE
+
+interface Discount {
+    double calculate(double amount);
+}
+
+class RegularDiscount implements Discount {
+
+    @Override
+    public double calculate(double amount) {
+        return amount * 0.1;
+    }
+}
+
+class PremiumDiscount implements Discount {
+
+    @Override
+    public double calculate(double amount) {
+        return amount * 0.2;
+    }
+}
+
+class DiscountCalculator {
+
+    public double calculateDiscount(
+            Discount discount,
+            double amount) {
+
+        return discount.calculate(amount);
+    }
+}
+
+Discount d = new PremiumDiscount();
+
+System.out.println(
+        new DiscountCalculator()
+        .calculateDiscount(d, 1000)
+);
+
+
+
+
+
+Liskov Substitution Principle (LSP):
+
+Objects of a child class should be able to replace objects of the parent class without breaking the program.
+
+In simple words:
+
+If B extends A, then anywhere I use A, I should be able to use B and everything should still work correctly.
+
+Liskov Substitution Principle states that subclasses should be substitutable for their base classes without altering the correctness of the program. If a child class cannot fully honor the behavior promised by the parent, inheritance is inappropriate. A classic example is making Penguin extend Bird when Bird exposes a fly() method. Since penguins cannot fly, replacing Bird with Penguin breaks expected behavior and violates LSP.
+
+BAD EXAMPLE:
+
+class Bird {
+
+    public void fly() {
+        System.out.println("Flying");
+    }
+}
+
+class Penguin extends Bird {
+
+    @Override
+    public void fly() {
+        throw new UnsupportedOperationException();
+    }
+}
+
+GOOD EXAMPLE:
+
+class Bird {
+}
+
+
+abstract class FlyingBird extends Bird {
+
+    abstract void fly();
+}
+
+class Sparrow extends FlyingBird {
+
+    @Override
+    void fly() {
+        System.out.println("Flying");
+    }
+}
+
+class Penguin extends Bird {
+}
+
+
+
+
+Interface Segregation Principle (ISP):
+
+Interface Segregation Principle states that no class should be forced to depend on methods it does not use. Instead of creating large, general-purpose interfaces, we should create smaller, role-specific interfaces. For example, rather than having a Printer interface containing print, scan, and fax methods, we can split them into separate interfaces so that classes only implement the functionality they actually support.
+
+BAD EXAMPLE:
+
+interface Printer {
+
+    void print();
+
+    void scan();
+
+    void fax();
+}
+
+class AllInOnePrinter implements Printer {
+
+    public void print() {}
+
+    public void scan() {}
+
+    public void fax() {}
+}
+
+class BasicPrinter implements Printer {
+
+    public void print() {}
+
+    public void scan() {
+        throw new UnsupportedOperationException();
+    }
+
+    public void fax() {
+        throw new UnsupportedOperationException();
+    }
+}
+
+GOOD EXAMPLE:
+
+interface Printer {
+    void print();
+}
+
+interface Scanner {
+    void scan();
+}
+
+interface FaxMachine {
+    void fax();
+}
+
+class BasicPrinter implements Printer {
+
+    @Override
+    public void print() {
+        System.out.println("Printing");
+    }
+}
+
+class AllInOnePrinter
+        implements Printer, Scanner, FaxMachine {
+
+    @Override
+    public void print() {}
+
+    @Override
+    public void scan() {}
+
+    @Override
+    public void fax() {}
+}
+
+
+
+
+
+
+Dependency Inversion Principle (DIP):
+
+High-level modules should not depend on low-level modules. Both should depend on abstractions.
+
+Consider an application that stores files in the cloud. A bad design would make DocumentService directly depend on AwsStorageService. If the organization migrates to Azure or GCP, the business code must be modified. Using DIP, we introduce a CloudStorage interface and create implementations like AwsStorageService, AzureStorageService, and GcpStorageService. The business layer depends only on the CloudStorage abstraction, so we can switch cloud providers without changing the application logic.
+
+BAD EXAMPLE:
+
+class AwsStorageService {
+
+    public void upload(String fileName) {
+        System.out.println("Uploading to AWS S3");
+    }
+}
+
+class DocumentService {
+
+    private AwsStorageService storage =
+            new AwsStorageService();
+
+    public void saveDocument(String fileName) {
+        storage.upload(fileName);
+    }
+}
+
+GOOD EXAMPLE:
+
+interface CloudStorage {
+
+    void upload(String fileName);
+}
+
+class AwsStorageService
+        implements CloudStorage {
+
+    @Override
+    public void upload(String fileName) {
+        System.out.println("Uploading to AWS S3");
+    }
+}
+
+class AzureStorageService
+        implements CloudStorage {
+
+    @Override
+    public void upload(String fileName) {
+        System.out.println("Uploading to Azure Blob Storage");
+    }
+}
+
+class GcpStorageService
+        implements CloudStorage {
+
+    @Override
+    public void upload(String fileName) {
+        System.out.println("Uploading to Google Cloud Storage");
+    }
+}
+
+class DocumentService {
+
+    private CloudStorage storage;
+
+    public DocumentService(CloudStorage storage) {
+        this.storage = storage;
+    }
+
+    public void saveDocument(String fileName) {
+        storage.upload(fileName);
+    }
+}
+
+usage:
+
+CloudStorage storage =
+        new AwsStorageService();
+
+DocumentService service =
+        new DocumentService(storage);
+
+service.saveDocument("resume.pdf");
+
+
+
+Explain the difference between DIP and DI.
+
+DIP is a design principle stating that high-level modules should depend on abstractions rather than concrete implementations. Dependency Injection is a technique used to achieve DIP by supplying dependencies from outside a class, typically through constructor injection. For example, a FileService may depend on a CloudStorage interface (DIP), and an AwsStorage implementation can be injected through the constructor (DI).

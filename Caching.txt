@@ -1,0 +1,412 @@
+Caching = keeping a copy of data closer to where it's needed so we avoid repeatedly performing expensive work.
+
+Two terms you MUST know: Cache hit and cache miss
+
+
+Where can we introduce caching?:
+For static assets such as JavaScript, CSS, fonts, and images, we can leverage browser/client caching using HTTP cache-control policies. This reduces repeat network requests and improves latency. Versioned asset URLs can allow long cache lifetimes without users getting outdated files.
+
+
+Client side caching:
+The key is that HTML, CSS, JavaScript, images, and fonts are usually separate HTTP resources, not one giant server response. The browser first requests the HTML; while parsing it, it discovers references to things like app.js, style.css, and logo.png and loads each separately. For each resource, the browser checks its local cache first. If logo.png is already cached and still fresh according to its caching policy, the browser can reuse the local copy instead of downloading it again. So the server isn't selectively removing the logo from the HTML response. The logo was never part of that HTML response in the first place; it is a separate resource.
+
+
+
+
+CDN Caching:
+A CDN (Content Delivery Network) is essentially a network of servers distributed geographically that can cache content closer to users. Providers include Cloudflare, AWS CloudFront, Akamai, and Azure Front Door. For example, Cloudflare caches content across geographically distributed data centers specifically to reduce latency and load on the origin server. An edge server is simply a CDN server positioned closer, in network terms, to users. Its job includes storing content so requests don't always have to travel to the origin. Origin = the real source of the content. That could ultimately be your application server, object storage, web server, etc.
+
+Why is CDN caching useful?
+Lower latency, Protects the origin
+
+What do we normally CDN-cache?
+Content that many users request and doesn't change frequently is fantastic for CDN caching. Images, Videos, CSS, JavaScript, Fonts, Downloadable files
+
+How would you improve latency for static content?:
+I'd put static assets such as images, CSS, JavaScript, fonts, and videos behind a CDN. The CDN caches them at geographically distributed edge locations near users. On a cache hit, the edge serves the asset without going back to the origin, reducing both user latency and load on our origin infrastructure. We'd control freshness using appropriate cache policies and versioned assets
+
+
+
+Server-side caching:
+Cache is inside our backend infrastructure.
+
+There are two important ways to do this:
+- Local / in-process cache
+- Dedicated / distributed cache, such as Redis
+
+
+Local / in-process cache:
+The cache is in the application's own memory, there's no network call to another cache server. That makes this extremely fast. But there's a big problem: In a real HLD, we probably don't have one application server. Each server has its own memory. They are independent caches. Updating the cache on Server A doesn't magically update Server B and C. This creates consistency and efficiency problems.
+
+Dedicated cache:
+Instead of putting the main cache inside every application server, all application servers talk to the same logical cache system. Redis is a common example. Redis supports storing and retrieving values by key and is widely used as an in-memory store/cache.Production setups may use a Redis cluster or managed service rather than literally one machine, but logically we can think of it as one shared caching layer. Managed offerings such as Google Cloud Memorystore provide Redis-based caches with capabilities such as replication, failover, scaling, and monitoring
+
+Why not always use Redis then?
+Because local caching has an important advantage. No network hop.For HLD interviews, though, Redis-style distributed caching is usually the more important one because you're commonly designing horizontally scaled services.
+
+Where would you put a server-side cache?:
+For a horizontally scaled service, I'd generally use a shared distributed cache such as Redis between the application tier and database. All application instances can then access the same cached data, reducing database reads. A local in-process cache can be even faster, but each server maintains its own copy, making invalidation and consistency across instances more difficult.
+
+
+
+
+
+Caching strategies
+
+1. Cache-aside (lazy loading):
+
+The application manages both the cache and the database.
+So algorithmically:
+1. Check cache
+
+2. If HIT:
+      return cached data
+
+3. If MISS:
+      query database
+      put result into cache
+      return result
+	  
+Why is it called "cache-aside"?
+Because the cache is literally sitting aside from the database. Your application explicitly decides which one to access. The cache is not automatically talking to the database. That's an important distinction because it's what will separate cache-aside from read-through.
+
+What happens when data changes?
+Someone updates the product. If we only update the database, our cache returns incorrect data. Invalidating after updating the database is a common cache-aside approach. The next read then repopulates the cache from the authoritative DB value.
+
+Why delete instead of update the cache? Why not just update both?
+You can. But invalidation is often simpler. The next read rebuilds the cache from the source of truth. This reduces some synchronization complexity, though concurrent requests can still create race.
+
+The key characteristic: lazy population
+Suppose your DB contains 10 million products. Do we immediately put all 10 million into Redis? No. Only requested products enter the cache. Lazy loading: We populate the cache only when the data is actually requested. Cache-aside therefore works especially well for read-heavy data where only some records are frequently accessed.
+
+Advantages:
+1.Only useful data gets cached - We don't waste cache memory loading millions of objects nobody requests.
+2.Cache failure doesn't necessarily kill the system - If Redis is unavailable, the application can potentially fall back to DB. Performance gets worse, but the database can remain the source of truth.
+
+Disadvantage:
+Cache miss penalty - The first request has to go to DB. So that request is actually doing more work than if there were no cache as it needs to write to cache as well. Subsequent requests benefit.
+
+
+How would you cache product data?
+I'd use a cache-aside strategy with Redis. The application first checks Redis. On a cache hit it returns the cached value; on a miss it reads from the database, populates Redis with a TTL, and returns the result. On an update, I'd update the database and invalidate the corresponding cache entry so the next read repopulates it.
+
+Eg: Amazon product catalog
+Products are read far more often than they're changed, and you only want popular products consuming cache memory.
+
+
+2. Read-through caching:
+Read-through looks almost identical to cache-aside in behavior. The crucial difference is: In cache-aside, the application handles a cache miss. In read-through, the cache layer handles the cache miss.
+If the value exists: Cache -> Application
+If it doesn't exist, the cache/cache layer invokes a configured loader to retrieve the value from the underlying data store, stores it, then returns it.
+From the application's perspective it doesn't care whether that resulted in Cache HIT OR Cache MISS -> DB -> Cache.
+Cache-aside - App owns the logic.
+Read-through - Cache layer owns the loading logic.
+
+But how does the cache know how to query our DB?
+You configure/provide a loader (sometimes called a cache store/provider) that knows how to retrieve the data from the underlying source. For example, Coherence</Oracle Coherence> uses a CacheStore abstraction that can connect to databases through mechanisms such as JDBC or JPA.
+
+Advantages
+Cleaner application code.
+
+Disadvantages
+The cache layer becomes more sophisticated.
+
+One subtle but important point:
+Read-through only tells us what happens during READS.
+It does not answer:
+What happens when someone updates product 123? That's a separate decision. Read-through is therefore commonly discussed alongside write strategies such as write-through or write-behind.
+
+Eg: Employee directory
+Lots of services need employee records, and you don't want every service repeatedly implementing:
+check cache
+if missing:
+    query DB
+    update cache
+
+Instead, the caching/data-access layer hides that complexity.
+
+
+
+
+
+3.Write-through caching
+When data is written, it is written to both the cache and the database before the write is considered successful. In systems such as Coherence</Oracle Coherence>, the cache write doesn't complete until the backing data source has also been successfully updated.
+
+Contrast that with cache-aside: For cache aside the next read repopulates the cache. With write-through: The cache is already populated with the new value.
+
+Why would we want this?
+Imagine we update a user's profile. A request immediately comes afterward. With write-through, the cache already contains new data. So reads can immediately get the updated value from the cache.
+
+The downside: 
+Slower writes - This is the major trade-off. The request isn't finished after writing to memory. It also has to wait for the backing database write. Coherence</Oracle Coherence>'s documentation explicitly notes that write-through does not improve write performance, because you're still paying the latency of writing to the underlying data source.
+Potentially caching useless data - With write-through, writes may populate/update cached entries even if those entries don't subsequently receive enough reads to justify occupying cache memory.
+
+Write-through + Read-through
+There's another important concept: These strategies aren't necessarily competing choices. Read-through describes the READ path. Write-through describes the WRITE path. So they can naturally be paired. Coherence</Oracle Coherence>, for example, supports both read-through and write-through integration with backing data sources through its cache-store mechanism.
+
+The key property to remember is:
+The write synchronously reaches both the cache and durable backing store before it is considered complete.
+The trade-off is essentially:
+Pay more during the write so subsequent reads have fresh cached data.
+
+
+Eg: User preferences
+Preferences may be read constantly across requests but updated relatively infrequently. We're willing to make the occasional write slower so subsequent reads have the fresh value.
+
+
+
+
+4. Write-Behind / Write-Back
+Write-behind changes one thing: The cache acknowledges the write immediately and writes it to the database asynchronously later.
+Some implementations maintain a queue of dirty/modified entries and flush them to the backing store after a configured delay. Coherence</Oracle Coherence>, for example, describes exactly this write-behind model.
+
+Why do this?
+Very fast writes.
+It can also reduce DB load by combining multiple updates before persisting them. For example, if the same object changes several times during the write-behind interval, a cache system may persist only the latest state rather than every intermediate update. Coherence</Oracle Coherence> calls this write coalescing.
+
+But there's a big danger:
+Before the asynchronous database write happens, cache crashes. You potentially lost an acknowledged write. That's the fundamental trade-off. Until the background write reaches durable storage, the cache effectively holds the newer state. This is why write-behind requires careful failure handling and durability assumptions.
+
+When is write-behind useful?
+It's attractive when:
+-write throughput is very high
+-immediate DB consistency isn't required
+-writes can be batched/coalesced
+-the system can tolerate or mitigate the durability risk
+Think of workloads such as high-volume counters or telemetry-like updates where reducing synchronous DB writes can be valuable.
+
+So write-behind is essentially:
+Trading durability/consistency complexity for lower write latency and potentially higher write throughput.
+
+
+Eg: YouTube view counter
+Huge write throughput and you may be able to batch/coalesce changes. If the product requires every individual view to be durably recorded, you'd need additional durable mechanisms, so don't blindly use this pattern for important events.
+
+
+
+5. Write around
+The basic rule is:
+Writes bypass the cache and go directly to the database. Data enters the cache later when it is read. We don't populate the cache with the new value during the write. Then reads use lazy caching. So data only occupies cache space if somebody actually reads it. This avoids cache pollution from write-heavy but rarely read data.
+
+But there's an important catch:
+When we update the DB we literally do nothing to the existing cache entry. We've created stale data. This is a known drawback of pure write-around when existing cached data is left untouched. That's why, in a practical design where the key may already be cached, you often combine the database-first write with cache invalidation.
+
+Eg:Logging / large ingestion system
+Most will never be queried soon after they're written. Putting every new record into Redis would pollute the cache. Lots of writes, but relatively few of those newly written objects become hot reads immediately.
+
+
+
+
+Examples:
+Amazon product page
+    → CACHE-ASIDE
+    "Load popular things lazily"
+
+Employee directory
+    → READ-THROUGH
+    "Cache handles DB retrieval"
+
+User preferences
+    → WRITE-THROUGH
+    "Keep cache + DB updated"
+
+YouTube view counter
+    → WRITE-BEHIND
+    "Write fast, persist later"
+
+Large ingestion/logging
+    → WRITE-AROUND
+    "Don't pollute cache with every write"
+	
+	
+	
+Cache Eviction
+
+1. TTL
+How long is this cached value allowed to live before we consider it expired?
+TTL policies are also used by CDN caches. For example, Cloudflare defines Edge Cache TTL as how long a resource may remain cached on its network; HTTP Cache-Control directives can also tell caches how long to consider a response fresh. So even if nothing explicitly updates the cache, staleness can be bounded by the TTL.
+
+How do you choose a TTL?
+There's no universal best TTL. Ask: How stale is this particular data allowed to be?
+
+
+2. Explicit cache invalidation
+
+Without explicit invalidation, users could potentially receive the stale cache data. So when we update the DB we also delete the cached data. That's explicit invalidation: deliberately removing or marking a cached value invalid when its underlying source changes.
+
+
+So do we use TTL OR invalidation?
+Very commonly: Both. Because invalidation gives us fast freshness after known updates while TTL provides a fallback/safety mechanism. TTL is about freshness. Eviction policies are primarily about managing finite cache capacity.
+
+How will you prevent stale cache data?:
+I'd set TTLs based on the freshness requirements of each data type and explicitly invalidate affected cache keys when the source of truth changes. Invalidation gives us faster freshness after known writes, while TTL acts as a safety net so a stale entry cannot remain cached indefinitely.
+
+
+Eviction policies
+
+We can't keep storing things forever. That's what an eviction policy decides. In Redis, eviction can be triggered when configured maxmemory is exceeded, with the selected policy determining which keys are removed.
+
+TTL          → remove because it's expired / too old
+Invalidation → remove because underlying data changed
+Eviction     → remove because cache needs memory
+
+1. LRU
+When I need space, evict the item that hasn't been accessed for the longest time. LRU relies on temporal locality: Something accessed recently is more likely to be accessed again soon than something that hasn't been accessed in a long time. LRU evicts the least recently accessed item when the cache needs space. It's a good choice when recently accessed data is likely to be accessed again.
+
+Disadvantage:
+LRU only cares about: "When was it last accessed?"
+It does not care: "How many times has it been accessed?"
+
+
+Eg: When something becomes trending like the latest phone in Amazon.
+
+2. LFU
+"How often has this item been accessed?"
+When cache memory fills up, LFU prefers to evict items with the lowest access frequency. This is the idea behind Redis's allkeys-lfu eviction policy.
+Realistic example: Amazon-like best sellers. If memory becomes constrained, LFU tries to retain the consistently popular products.
+LFU is therefore attractive when your workload has relatively stable hot and cold items, such as best-selling products. Redis describes LFU as well suited to predictable/skewed workloads where frequently accessed items should remain cached.
+
+Disadvantage:
+Historical popularity shouldn't necessarily keep something cached forever. Practical LFU implementations can use frequency decay, gradually reducing the effect of old accesses. Redis's LFU implementation includes a decay mechanism for this reason. LFU usually needs some way of preventing ancient popularity from permanently dominating current popularity.
+
+Interview-level takeaway:
+LRU: great when recent access predicts near-future access.
+LFU: great when some items are consistently much more popular than others.
+
+
+3. FIFO
+When the cache is full, evict whichever item entered the cache first. It doesn't care how recently or how frequently that item has been accessed. You don't need to constantly update recency like LRU or maintain frequency information like LFU. The trade-off is that insertion age isn't necessarily a good predictor of future usefulness, so FIFO may produce worse cache decisions for many workloads.
+
+
+4. Random Eviction
+When the cache is full, randomly choose an entry and evict it. Redis supports allkeys-random, which randomly removes keys when it needs memory, and volatile-random, which randomly removes only keys that have an expiration configured.
+
+Why would anyone do this?
+Because it's simple and has low tracking overhead. Redis explicitly offers random eviction alongside LRU and LFU, so it can be appropriate when sophisticated access tracking isn't valuable for the workload.
+
+When does random eviction make sense?
+Imagine your workload is roughly uniform. There aren't really "hot" and "cold" items. LRU/LFU may not give you much advantage because all the items are similarly useful. Random eviction can be a reasonable simple choice.
+
+
+5. TTL-based eviction
+When the cache is full, evict the item that is going to expire soonest anyway. In Redis, this policy is called volatile-ttl. It considers keys that have an expiration and favors evicting those with the shortest remaining TTL.
+
+When does this make sense?
+It makes sense when remaining TTL roughly represents remaining usefulness. 
+
+
+
+6. No-Eviction
+This is the simplest policy: When the cache reaches its memory limit, don't remove anything. Reject operations that need additional memory instead.
+
+Why would we ever want this?
+Because sometimes the data in Redis isn't disposable. Imagine Redis is being used for something where silently removing a key would be unacceptable, such as a job queue or data that cannot easily be reconstructed.
+
+
+
+
+Cache Stampede / Thundering Herd
+
+Imagine an Amazon-like product is extremely popular. Almost none of those requests touch the database. Then suddenly the TTL expires. Suppose 1,000 requests arrive almost simultaneously. Every application request independently does:
+Redis GET
+    ↓
+MISS
+    ↓
+Query DB
+So instead of one request rebuilding the cache, you might suddenly have hundreds or thousands of identical database queries. This is called a cache stampede, thundering herd, or dogpile effect.
+
+Why is it dangerous?
+Ironically, your most popular cached data can cause the biggest problem. A sufficiently large spike can exhaust database connections, increase latency, cause timeouts, and create cascading failures.
+
+
+Most common solution: locking / request coalescing:
+When the cache misses, only ONE request is allowed to rebuild that cache entry.
+Suppose 1,000 requests encounter a cache miss. They compete for a short-lived lock. The other requests can wait and retry redis a little later. (maybe the data is available now)
+
+
+Another cause: many keys expiring together
+Stampedes aren't limited to one hot key. Suppose we populate 100,000 cache entries at 10:00 with TTL 10 minutes. 100,000 keys expire around the same time 10:10. This can create a huge DB spike.
+
+Mitigation: TTL jitter
+Instead of TTL = exactly 600 seconds. Give entries slightly different expiration times. This is called TTL jitter. Adding randomness to expiration times reduces synchronized expiration of many keys.
+
+What is a cache stampede?
+A cache stampede occurs when a popular cached value expires and many concurrent requests miss the cache and simultaneously query the underlying database. That sudden load can overwhelm the database. I'd mitigate it using request coalescing or a distributed lock so only one request rebuilds a given key, and use TTL jitter to prevent large numbers of keys from expiring simultaneously.
+
+
+
+Hot Keys:
+A hot key is a cache key that receives a disproportionately large amount of traffic compared with other keys. This can overload the Redis node that owns that key even when the overall Redis cluster has plenty of spare capacity.
+Adding more shards doesn't inherently split one key's traffic, because that key still maps to one shard. This concentration can create network saturation, latency, and uneven cluster utilization.
+
+How do we solve it?
+Approach 1: Local cache - each application server keeps a very short-lived local copy. So instead of every user request hitting Redis, Redis receives only the occasional local-cache refresh. Using a small in-process cache is a common mitigation for read-hot keys because it removes many network calls to the shared cache. Obvious downside - Now we've created multiple copies. If the price changes those local caches can temporarily contain stale values. That's why local caching for hot keys often uses a small TTL when bounded staleness is acceptable.
+
+Approach 2: Replication - If we have read replicas, copies of that key exist on multiple Redis nodes. Redis supports replicas for increasing read throughput in addition to availability. This can take substantial pressure off the node that originally handled all requests for the hot key. Read replicas are a common mitigation for read-heavy Redis hot keys. What about writes? You generally cannot distribute independent writes to all these replicas. The write goes to the primary and is replicated outward. This means replication mainly helps read-hot keys, not a key overwhelmed by writes. And because replication can be asynchronous, a replica can briefly be behind the primary, so routing reads to replicas may introduce some staleness.
+
+Approach 3: Split / replicate the key manually - Instead of one key: product:iphone,  create multiple copies:
+product:iphone:1
+product:iphone:2
+product:iphone:3
+product:iphone:4
+Because the keys are different, hashing can place them on different Redis shards. Now one logical hot object has been turned into multiple physical cache keys, spreading its read traffic. Key splitting/replication is a recognized hot-key mitigation. Of course, writes become more complicated because when the price changes, you must update or invalidate all the copies.
+
+What is a hot key and how would you handle it?
+A hot key is a single cache key receiving disproportionate traffic, which can overload the Redis shard that owns it even if the rest of the cluster is underutilized. For a read-heavy hot key, I could add a short-lived local application cache, distribute reads across Redis replicas, or replicate/split the logical key across multiple cache nodes. The right choice depends on how much staleness the application can tolerate.
+
+
+Cache penetration:
+Cache penetration happens when requests repeatedly ask for data that does not exist in either the cache or the database. Because the cache has nothing to return, every request becomes a cache miss and reaches the database, potentially overwhelming it.
+
+Solution 1: The simplest solution is negative caching, where we cache a NOT_FOUND result with a short TTL so repeated requests for the same nonexistent key no longer hit the database
+Solution 2: If requests use many different random nonexistent IDs, negative caching is less effective and can waste cache memory. In that case, a Bloom filter can sit before the cache and quickly determine that an ID definitely does not exist, allowing us to reject the request without hitting either the cache or database; Bloom filters may produce false positives, meaning they can say something might exist when it doesn't, but that merely causes a normal lookup.
+
+
+
+
+How do you maintain consistency between Redis and the DB?
+The database remains my source of truth. With cache-aside, I'd update the database first and invalidate the corresponding cache key. I'd also use an appropriate TTL as a fallback so failed invalidations cannot leave stale entries indefinitely. The TTL and any stronger consistency mechanism depend on how much staleness the business can tolerate.
+
+
+
+Distributed caching and scaling Redis
+
+Eventually one Redis machine can become insufficient because of memory capacity, CPU/throughput, or availability requirements. At that point we can scale horizontally using multiple Redis nodes. Redis Cluster</Redis Cluster> provides horizontal scaling by automatically sharding data across nodes.
+There are two separate problems we need to solve:
+-Scaling capacity/throughput → Sharding
+-Handling node failure → Replication
+
+
+Sharding:
+Consistent hashing is a general sharding technique. Redis Cluster itself uses hash slots. Redis Cluster</Redis Cluster> divides its keyspace into exactly 16,384 hash slots. Each key maps to a slot, and slots are assigned to primary nodes.
+
+key
+ ↓
+hash(key)
+ ↓
+one of 16,384 slots
+ ↓
+node that owns slot
+
+
+Who performs the routing?
+Usually a cluster-aware Redis client knows the cluster topology and routes requests toward the node responsible for the relevant slot. Redis's scalability documentation specifically calls out cluster-aware clients routing requests to the appropriate shard.
+
+Sharding solves capacity/throughput distribution. It does NOT automatically solve availability.
+
+
+Replication:
+Redis replication uses a primary → replica model. One primary can continuously copy its changes to one or more replicas. Redis replication is asynchronous by default, meaning the primary normally does not wait for every replica to process each write before acknowledging it to the client.
+
+What happens if the primary dies?
+The replica has a copy of the shard's data. With an appropriate automatic failover mechanism, a replica can be promoted to become the new primary. Replication provides the copy, while failover is the mechanism that promotes/reroutes to a replacement primary. Redis Cluster includes shard-level failover; for a non-sharded primary/replica deployment, Redis Sentinel can provide automatic failover. Replication creates backups/copies. Failover decides to use one of those copies when the primary dies.
+
+Replicas can also help reads. Replication isn't only about failure recovery. A read-heavy architecture can potentially distribute reads. This increases read capacity, though applications must account for asynchronous replication if they require immediately fresh reads.
+
+
+How would you scale and make Redis highly available?
+I'd shard the keyspace across multiple Redis primaries to distribute memory and throughput, and maintain replicas for those primaries for redundancy. If a primary fails, automatic failover can promote one of its replicas. Redis replication is asynchronous by default, so there's a small possibility of losing the latest replicated cache writes during failure, which is generally acceptable when Redis is being used as a cache and the database remains the source of truth.
+
+
+What to cache?
+I wouldn't cache everything. I'd prioritize frequently accessed, expensive-to-fetch data with a high read-to-write ratio and an acceptable staleness window. I'd choose the cache granularity based on the invalidation complexity and access pattern.
